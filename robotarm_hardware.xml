@@ -1,0 +1,9 @@
+<library path="anglereader_hardware_interface">
+  <class name="anglereader_hardware/ANGLEReaderSystemHardware"
+         type="anglereader_hardware::ANGLEReaderSystemHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ROS2 control for ANGLEReader.
+    </description>
+  </class>
+</library>

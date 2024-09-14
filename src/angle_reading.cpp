@@ -12,34 +12,59 @@
 
 const std::string SERIAL_DEV = "/dev/ttyUSB0";
 
-// 동기 방식 키보드 입력. 비동기 방식으로 해야 될듯.
-int getch(void)
-{
-  int ch;
-  struct termios oldt;
-  struct termios newt;
-
-  // Store old settings, and copy to new settings
-  tcgetattr(STDIN_FILENO, &oldt);
-  newt = oldt;
-
-  // Make required changes and apply the settings
-  newt.c_lflag &= ~(ICANON | ECHO);
-  newt.c_iflag |= IGNBRK;
-  newt.c_iflag &= ~(INLCR | ICRNL | IXON | IXOFF);
-  newt.c_lflag &= ~(ICANON | ECHO | ECHOK | ECHOE | ECHONL | ISIG | IEXTEN);
-  newt.c_cc[VMIN] = 1;
-  newt.c_cc[VTIME] = 0;
-  tcsetattr(fileno(stdin), TCSANOW, &newt);
-
-  // Get the current character
-  ch = getchar();
-
-  // Reapply old settings
-  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-
-  return ch;
+// 키보드 비동기 입력 관련 함수
+static struct termios initial_settings, new_settings;
+static int peek_character = -1;
+void init_keyboard(){
+    tcgetattr(0,&initial_settings);
+    new_settings = initial_settings;
+    new_settings.c_lflag &= ~ICANON;
+    new_settings.c_lflag &= ~ECHO;
+    new_settings.c_cc[VMIN] = 1;
+    new_settings.c_cc[VTIME] = 0;
+    tcsetattr(0, TCSANOW, &new_settings);
 }
+
+void close_keyboard(){
+    tcsetattr(0, TCSANOW, &initial_settings);
+}
+
+int _kbhit(){
+    unsigned char ch;
+    int nread;
+    if (peek_character != -1) return 1;
+    new_settings.c_cc[VMIN]=0;
+    tcsetattr(0, TCSANOW, &new_settings);
+    nread = read(0,&ch,1);
+    new_settings.c_cc[VMIN]=1;
+    tcsetattr(0, TCSANOW, &new_settings);
+
+    if(nread == 1){
+        peek_character = ch;
+        return 1;
+    }
+    return 0;
+}
+
+int _getch(){
+    char ch;
+    if(peek_character != -1){
+        ch = peek_character;
+        peek_character = -1;
+        return ch;
+    }
+
+    read(0,&ch,1);
+    return ch;
+}
+
+int _putch(int c){
+    putchar(c);
+    fflush(stdout);
+    return c;
+}
+// 키보드 비동기 입력 관련 함수 끝...
+
 
 int main(int argc, char **argv)
 {
@@ -60,13 +85,31 @@ int main(int argc, char **argv)
     drvr_->setManualModeAll(true, joint_num);
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    char input;
+    init_keyboard();
 
     while(rclcpp::ok()){
         auto t2 = std::chrono::high_resolution_clock::now();
         auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2-t1);
-        input = getch();
 
+        // 비동기 키보드 입력
+        // h버튼 누르면 hold - 토크 있음
+        // u버튼 누르면 unhold - 토크 없음
+        if(_kbhit()){
+            int ch = _getch();
+            _putch(ch);
+            if(ch == 'h'){
+                std::cout << std::endl;
+                std::cerr << "Try moving it by hand - should be holding position" << std::endl;
+                drvr_->setManualModeAll(false, joint_num);
+            }
+            else if(ch == 'u'){
+                std::cout << std::endl;
+                std::cout << "Try moving it by hand - should be free to move" << std::endl;
+                drvr_->setManualModeAll(true, joint_num);
+            }
+        }
+
+        // time interval이 0.500초를 넘으면 한번씩 정보 reading
         if(time_span.count() > 0.500){
             for(int i = 0; i < joint_num; i++){
                 uint16_t pos;
@@ -84,8 +127,6 @@ int main(int argc, char **argv)
             std::cout << "-----------------------------------------------------------------------------------" << std::endl;
             t1 = std::chrono::high_resolution_clock::now(); // t1 업데이트
         }
-
-        std::cout << "input : " << input << std::endl;
     }
 
     std::cout << "Bye" << std::endl;
